@@ -1,0 +1,36 @@
+services:
+  universal-scraper:
+    build: .
+    container_name: universal-scraper
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - scraper-data:/app/data
+    mem_limit: 512m
+    networks:
+      - caddy-net
+      - solver-internal
+
+  cloudflare-solver:
+    image: ghcr.io/b00h0o/cloudflare-solver:latest
+    container_name: cloudflare-solver
+    profiles: ["solver"]
+    restart: unless-stopped
+    shm_size: "512mb"
+    mem_limit: 1g
+    environment:
+      - PORT=407
+      - BROWSERS=1
+      - TABS=2
+      - timeOut=25000
+    networks:
+      - solver-internal
+
+volumes:
+  scraper-data:
+
+networks:
+  caddy-net:
+    external: true
+  solver-internal:
+    internal: false
