@@ -18,7 +18,9 @@ from app.schemas import (
 )
 from app.security import normalize_canonical_url
 
-_SRCSET_SPLIT_RE = re.compile(r",\s*(?=\S)")
+_SRCSET_ENTRY_RE = re.compile(
+    r"([^\s,]+(?:,\d+[^\s,]*)?)(?:\s+\d+(?:\.\d+)?[wx])?(?:\s*,\s*|$)"
+)
 _WHITESPACE_RE = re.compile(r"\s+")
 _NEXT_TEXT_RE = re.compile(r"^\s*(next|next\s+page|older|selanjutnya|›|»|>)\s*$", re.I)
 
@@ -55,11 +57,11 @@ def extract_srcset_urls(srcset: str | None, base_url: str) -> list[str]:
     if not srcset:
         return []
     urls: list[str] = []
-    for part in _SRCSET_SPLIT_RE.split(srcset.strip()):
-        tokens = part.strip().split()
-        if not tokens:
+    for match in _SRCSET_ENTRY_RE.finditer(srcset.strip()):
+        candidate = (match.group(1) or "").strip()
+        if not candidate or candidate.isdigit():
             continue
-        resolved = resolve_url(tokens[0], base_url)
+        resolved = resolve_url(candidate, base_url)
         if resolved and resolved not in urls:
             urls.append(resolved)
     return urls
@@ -78,13 +80,16 @@ def extract_node_images(scope: LexborNode, base_url: str) -> list[ImageItem]:
     ) -> None:
         if not url or url in seen or url.startswith("data:"):
             return
-        # Skip 1x1 tracking pixels or blank spacer gifs
-        if any(tok in url.lower() for tok in ("spacer.gif", "pixel.gif", "1x1.")):
+        # Skip 1x1 tracking pixels, blank spacer gifs, or lazy grey placeholders
+        if any(
+            tok in url.lower()
+            for tok in ("spacer.gif", "pixel.gif", "1x1.", "placeholder.")
+        ):
             return
         seen.add(url)
         items.append(ImageItem(url=url, alt=alt, caption=caption, width=width, height=height))
 
-    for img in scope.css("img, picture source, noscript"):
+    for img in scope.css("img, picture source, noscript, [data-src], [data-lazy-src], [data-bg]"):
         tag = img.tag
         if tag == "noscript":
             inner_html = img.html or ""
@@ -107,7 +112,22 @@ def extract_node_images(scope: LexborNode, base_url: str) -> list[ImageItem]:
                 _add(u)
             continue
 
+        if tag != "img":
+            for attr_name in ("data-src", "data-lazy-src", "data-bg"):
+                u = resolve_url(img.attributes.get(attr_name), base_url)
+                if u:
+                    _add(u)
+            continue
+
         attrs = img.attributes
+        img_cls = (attrs.get("class") or "").lower()
+        src_peek = (attrs.get("src") or attrs.get("data-src") or "").lower()
+        # Skip tiny inline avatar/badge icons (e.g. Tailwind size-2.5 / size-3.5 or /avatars/)
+        if any(
+            tok in img_cls
+            for tok in ("size-2", "size-3", "size-4", "size-5", "w-3 ", "w-4 ", "h-3 ", "h-4 ", "avatar")
+        ) or any(tok in src_peek for tok in ("/avatars/", "cdn-avatars.")):
+            continue
         alt = clean_text(attrs.get("alt")) or None
         w_str, h_str = attrs.get("width") or "", attrs.get("height") or ""
         w_match, h_match = re.match(r"^\s*(\d+)", w_str), re.match(r"^\s*(\d+)", h_str)
@@ -274,7 +294,7 @@ def parse_content(tree: LexborHTMLParser, content_mode: str = "main") -> Content
             if content_mode == "main":
                 anc = node.parent
                 skip = False
-                while anc and anc != scope:
+                while anc is not None and anc.mem_id != scope.mem_id:
                     anc_cls = (anc.attributes.get("class") or "").lower()
                     if anc.tag in {"nav", "footer", "aside", "header"} or "sidebar" in anc_cls:
                         skip = True

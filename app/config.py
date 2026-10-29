@@ -33,7 +33,7 @@ class Settings:
     api_bearer_token: str = os.getenv("API_BEARER_TOKEN", "")
     require_auth: bool = _env_bool("REQUIRE_AUTH", False)
 
-    max_body_bytes: int = int(os.getenv("MAX_BODY_BYTES", str(5 * 1024 * 1024)))
+    max_body_bytes: int = int(os.getenv("MAX_BODY_BYTES", str(10 * 1024 * 1024)))
     connect_timeout_s: float = float(os.getenv("CONNECT_TIMEOUT_S", "5.0"))
     read_timeout_s: float = float(os.getenv("READ_TIMEOUT_S", "15.0"))
     max_redirects: int = int(os.getenv("MAX_REDIRECTS", "5"))

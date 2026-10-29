@@ -155,15 +155,20 @@ async def _fetch_once_curl(
     url: str,
     headers: dict[str, str],
     max_bytes: int,
+    impersonate: str = "chrome",
 ) -> tuple[int, dict[str, str], bytes]:
     async with CurlAsyncSession(
-        impersonate="chrome",
+        impersonate=impersonate,
         timeout=settings.read_timeout_s,
-        allow_redirects=False,
-         max_recv_speed=0,
-         proxy=settings.default_proxy_url,
+        proxy=settings.default_proxy_url,
+        trust_env=False,
     ) as session:
-        resp = await session.get(url, headers=headers, stream=True)
+        resp = await session.get(
+            url,
+            headers=headers or None,
+            allow_redirects=False,
+            stream=True,
+        )
         try:
             norm_headers = {k.lower(): v for k, v in resp.headers.items()}
             if resp.status_code in {301, 302, 303, 307, 308}:
@@ -197,13 +202,13 @@ async def fetch_page(
     domain = urlparse(current_url).hostname or "default"
 
     async with _global_sem, _get_domain_sem(domain):
-        headers = dict(DEFAULT_HEADERS)
+        use_curl = HAS_CURL_CFFI and transport is None
+        engine = "curl_cffi" if use_curl else "httpx"
+        # Let curl_cffi use its native impersonated Chrome UA/Sec-Ch-Ua headers unless cf_clearance overrides it
+        headers: dict[str, str] = {} if use_curl else dict(DEFAULT_HEADERS)
         cached_cf = storage.get_cf_clearance(domain)
         if cached_cf:
             headers["Cookie"], headers["User-Agent"] = cached_cf
-
-        use_curl = HAS_CURL_CFFI and transport is None
-        engine = "curl_cffi" if use_curl else "httpx"
         challenge_solved = False
 
         for _hop in range(settings.max_redirects + 1):
@@ -232,6 +237,22 @@ async def fetch_page(
                 continue
 
             text = raw_bytes.decode("utf-8", errors="replace")
+            # Zero-RAM TLS profile rotation when default TLS profile is rejected with 401/403
+            if use_curl and status in {401, 403} and not _is_cf_challenge(status, resp_headers, text[:4096]):
+                safari_headers = {
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Sec-Fetch-Dest": "document",
+                    "Sec-Fetch-Mode": "navigate",
+                    "Sec-Fetch-Site": "none",
+                }
+                status, resp_headers, raw_bytes = await _fetch_once_curl(
+                    current_url, safari_headers, limit, impersonate="safari"
+                )
+                text = raw_bytes.decode("utf-8", errors="replace")
+                if status == 200:
+                    engine = "curl_cffi:safari"
+
             if _is_cf_challenge(status, resp_headers, text[:4096]):
                 solved = await _solve_cf_iuam(current_url)
                 if solved:

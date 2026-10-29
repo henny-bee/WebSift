@@ -26,8 +26,8 @@ def test_healthz() -> None:
 
 
 @pytest.mark.anyio
-async def test_multi_region_mal_style_listing_and_dedupe() -> None:
-    html = (FIXTURES / "mal_news_multi_region.html").read_text(encoding="utf-8")
+async def test_multi_region_listing_and_dedupe() -> None:
+    html = (FIXTURES / "news_multi_region.html").read_text(encoding="utf-8")
     req = ScrapeRequest(url="https://example.com/news")
     res = await execute_scrape(req, html_override=html)
 
@@ -83,7 +83,7 @@ async def test_table_based_forum_listing() -> None:
     assert len(threads.items) == 2
     assert threads.items[0].title == "Best self-hosted Python HTML parsers in 2026?"
     assert threads.items[0].url == "https://forum.example.com/threads/501"
-    assert threads.items[0].attributes["author"] == "dev_tiar"
+    assert threads.items[0].attributes["author"] == "dev_alex"
     assert threads.items[0].attributes["replies"] == 42
     assert threads.items[0].attributes["last_activity_text"] == "3 hours ago"
 

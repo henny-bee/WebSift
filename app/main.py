@@ -104,6 +104,15 @@ async def execute_scrape(
     page_info = parse_page_metadata(tree, base_url, final_url) if "metadata" in sections else PageInfo()
     structured = parse_json_ld(tree) if ("structured_data" in sections or "collections" in sections) else []
 
+    images = (
+        extract_node_images(tree.body or tree.root, base_url)[:max_items]  # type: ignore[arg-type]
+        if ("images" in sections and req.include_image_urls and (tree.body or tree.root))
+        else []
+    )
+
+    # Strip inline script/style/svg/template tags so CSS-in-JS never pollutes .text()
+    tree.strip_tags(["script", "style", "svg", "template"])
+
     content_info = ContentInfo()
     if "text" in sections or "headings" in sections:
         parsed_content = parse_content(tree, content_mode=req.content_mode)
@@ -114,11 +123,6 @@ async def execute_scrape(
         )
 
     links = parse_links(tree, base_url, final_url, max_items=max_items) if "links" in sections else []
-    images = (
-        extract_node_images(tree.body or tree.root, base_url)[:max_items]  # type: ignore[arg-type]
-        if ("images" in sections and req.include_image_urls and (tree.body or tree.root))
-        else []
-    )
 
     collections = []
     regions_scanned: list[str] = []
